@@ -1,0 +1,53 @@
+name: 🐛 Bug Report
+description: Report a bug or issue with a workflow or the host setup
+title: "[BUG] "
+labels: ["bug"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report!
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the Bug
+      description: A clear and concise description of what the bug is.
+      placeholder: E.g., Node 9 returns a 400 error when appending blocks...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps To Reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. Setup Notion DB
+        2. Run research engine
+        3. Execute n8n Node 8...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: A clear and concise description of what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: n8n or Python Execution Logs
+      description: Paste any relevant logs, errors, or stack traces here.
+      render: json
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I have verified that my `.env` variables are correctly configured.
+          required: true
+        - label: I have verified that my API credentials are linked to the correct nodes.
+          required: true
+        - label: I have confirmed that this issue is not caused by rate limits.
+          required: true

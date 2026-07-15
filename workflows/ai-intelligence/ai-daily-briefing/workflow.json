@@ -1,0 +1,574 @@
+{
+  "name": "AI Daily Intelligence Pipeline V1",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * *"
+            }
+          ]
+        }
+      },
+      "id": "96d14a98-ee6b-416b-ba08-71bb3cff199d",
+      "name": "Node 1: Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -448,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const isoDate = $now.toFormat('yyyy-MM-dd');\nconst parts = isoDate.split('-');\nconst dd = parts[2];\nconst mm = parts[1];\nconst yy = parts[0].slice(2);\nconst dateLabel = `${dd}-${mm}-${yy}`;\nconst date30DaysAgo = $now.minus({ days: 30 }).toFormat('yyyy-MM-dd');\nreturn [{ json: { isoDate, dateLabel, date30DaysAgo, pageTitle: `AI-Updates-${dateLabel}` } }];"
+      },
+      "id": "3a736ad3-0c51-4f85-9f99-1bcfe5c188ad",
+      "name": "Node 2: Get Current Date",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "privateKey",
+        "command": "timeout 90 python3 /home/ubuntu/research-engine/research.py 'AI LLM models news releases' --emit=compact --quick 2>&1 | head -c 30000"
+      },
+      "id": "9fc5ae38-52fa-4c84-b5da-3d7037064067",
+      "name": "Node 3: Run Research Engine",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "sshPrivateKey": {
+          "id": "kdwCvoTTiS54qDaE",
+          "name": "VPS SSH (ubuntu@159.13.36.234)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://openrouter.ai/api/v1/models",
+        "options": {}
+      },
+      "id": "3196eab3-5f1e-4fb6-b75e-08752076cbff",
+      "name": "Node 4: OpenRouter Models API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        224,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const PROVIDERS = [\n  { key: 'openai', label: 'OpenAI' },\n  { key: 'anthropic', label: 'Anthropic' },\n  { key: 'google', label: 'Google' },\n  { key: 'x-ai', label: 'xAI' },\n  { key: 'deepseek', label: 'DeepSeek' },\n  { key: 'qwen', label: 'Qwen' },\n  { key: 'meta-llama', label: 'Meta' },\n  { key: 'minimax', label: 'MiniMax' },\n  { key: 'moonshotai', label: 'Moonshot AI' },\n  { key: 'mistralai', label: 'Mistral' },\n  { key: 'z-ai', label: 'Z.AI' },\n  { key: 'microsoft', label: 'Microsoft' }\n];\nconst EXCLUDE = /embed|tts|speech|rerank|whisper|vision-only|image-gen/i;\nconst data = $input.first().json;\nconst allModels = data.data || [];\nconst nowSec = Math.floor($now.toSeconds());\nconst weekAgo = Math.floor($now.minus({ days: 7 }).toSeconds());\nfunction toM(p) {\n  const n = parseFloat(p || '0');\n  return isNaN(n) ? '?' : '$' + (n * 1e6).toFixed(2);\n}\nfunction ctx(n) {\n  return n ? Math.round(n / 1000) + 'K' : '?';\n}\nconst viable = allModels.filter(m => m.id && !EXCLUDE.test(m.id) && m.pricing?.prompt !== undefined);\nconst newThisWeek = viable\n  .filter(m => m.created && m.created > weekAgo)\n  .sort((a, b) => (b.created || 0) - (a.created || 0))\n  .slice(0, 8);\nconst dateStr = $now.toFormat('yyyy-MM-dd');\nlet lines = ['---', '## Model Pricing Dashboard', '> Live from OpenRouter - ' + dateStr + ' - All prices in $/1M tokens', ''];\nif (newThisWeek.length) {\n  lines.push('### New This Week', 'Models added to OpenRouter in the last 7 days:');\n  for (const m of newThisWeek) {\n    const da = m.created ? Math.floor((nowSec - m.created) / 86400) + 'd ago' : '';\n    lines.push('- **' + (m.name || m.id) + '** - ' + toM(m.pricing?.prompt) + ' input / ' + toM(m.pricing?.completion) + ' output - ' + ctx(m.context_length) + ' ctx' + (da ? ' - ' + da : ''));\n  }\n  lines.push('');\n}\nfor (const prov of PROVIDERS) {\n  const models = viable\n    .filter(m => m.id.startsWith(prov.key + '/'))\n    .sort((a, b) => (b.created || 0) - (a.created || 0))\n    .slice(0, 5);\n  if (!models.length) continue;\n  lines.push('### ' + prov.label);\n  for (const m of models) {\n    lines.push('- **' + (m.name || m.id.split('/').pop()) + '** - ' + toM(m.pricing?.prompt) + ' input / ' + toM(m.pricing?.completion) + ' output - ' + ctx(m.context_length) + ' ctx');\n  }\n  lines.push('');\n}\nlines.push('[' + PROVIDERS.map(p => p.label).join(' - ') + ']');\n\nreturn [{ json: { pricingSection: lines.join('\\\\n'), selectedModel: 'openrouter/free' } }];"
+      },
+      "id": "c34c7768-b5d1-4ddb-abb1-0202b9c2085b",
+      "name": "Node 5: Build Pricing Section",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => { const isoDate = $('Node 2: Get Current Date').first().json.isoDate; const researchRaw = $('Node 3: Run Research Engine').first().json.stdout || ''; const research = researchRaw.slice(0, 20000) || 'No research data returned.'; const pricing = $('Node 5: Build Pricing Section').first().json.pricingSection; const selectedModel = 'openrouter/free'; const prompt = 'TODAY\\'S DATE: ' + isoDate + '\\n\\nRESEARCH DATA — use ONLY these facts, titles, and URLs:\\n---\\n' + research + '\\n---\\n\\nPRICING SECTION — paste this VERBATIM at the very end of your report:\\n---\\n' + pricing + '\\n---\\n\\nMANDATORY RULES:\\n1. Every fact, model name, price, URL must come from RESEARCH DATA or PRICING SECTION above. Do NOT use training memory for any fact.\\n2. Omit any section with no relevant news. Never write filler text.\\n3. All pricing = $ per million tokens ($/1M). Never use raw decimals.\\n4. \"Best Local Model\" = specific model name only (e.g. Llama 3.3 70B, Phi-4, Qwen3-235B). NEVER a tool/app (LM Studio, Ollama, Jan). Leave blank if no notable local model today.\\n5. \"Featured Models\" = tag EVERY model mentioned anywhere in the report.\\n6. Importance: Critical=frontier model released OR major security issue. High=significant model/pricing. Medium=updates. Low=minor.\\n7. Source URLs = copy verbatim from RESEARCH DATA. Never construct URLs.\\n8. Use ## for sections, **bold** for key terms, bullet points for lists. NO markdown tables in the body.\\n9. \"Summary\" property = max 280 characters, plain text only.\\n\\nOUTPUT in this exact order:\\n\\nFirst: a JSON block:\\n```json\\n{\\n  \"summary\": \"\",\\n  \"category\": [],\\n  \"topics\": [],\\n  \"providers\": [],\\n  \"featured_models\": [],\\n  \"importance\": \"Medium\",\\n  \"report_type\": \"Daily\",\\n  \"new_model_released\": false,\\n  \"pricing_changed\": false,\\n  \"open_source\": false,\\n  \"free_promotion\": false,\\n  \"worth_installing\": false,\\n  \"best_coding_model\": \"\",\\n  \"best_reasoning_model\": \"\",\\n  \"best_local_model\": \"\",\\n  \"best_value_api\": \"\",\\n  \"biggest_release\": \"\"\\n}\\n```\\n\\nThen the 10-section report:\\n## Executive Summary\\n## New Model Releases\\n## Pricing & API Changes\\n## Open Source Updates\\n## AI Agent & MCP News\\n## Coding Tools\\n## Promotions & Free Tiers\\n## Notable Research\\n## Recommendations\\n## Sources\\n\\nThen paste the PRICING SECTION verbatim at the very end.'; return { model: selectedModel, messages: [{ role: 'user', content: prompt }], temperature: 0.3 }; })() }}",
+        "options": {}
+      },
+      "id": "b9dde0ce-8bff-4995-a65a-b94bee4d3bed",
+      "name": "Node 6: AI Generate Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        672,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hzDt5jzzkzvlfGlb",
+          "name": "OpenRouter API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const aiResponse = $input.first().json;\nconst fullText = aiResponse.choices?.[0]?.message?.content || '';\nconst dateInfo = $('Node 2: Get Current Date').first().json;\nif (!fullText) throw new Error('Node 6 returned empty content from AI');\n\n// 1. Extract JSON properties block\nconst jsonFenceMatch = fullText.match(/```json([\\s\\S]*?)```/);\nlet metadata = {};\nif (jsonFenceMatch) {\n  try { metadata = JSON.parse(jsonFenceMatch[1].trim()); } catch (e) { metadata = { parseError: e.message }; }\n}\nconst afterJsonBlock = jsonFenceMatch ? fullText.slice(fullText.indexOf(jsonFenceMatch[0]) + jsonFenceMatch[0].length).trim() : fullText.trim();\n\n// 2. Inline rich_text parser — handles **bold** and [text](url)\nconst MAX_RT = 1800;\nfunction makeTextRt(content, annotations) {\n  const rt = [];\n  let remaining = content;\n  while (remaining.length > 0) {\n    const chunk = remaining.slice(0, MAX_RT);\n    remaining = remaining.slice(MAX_RT);\n    const obj = { type: 'text', text: { content: chunk } };\n    if (annotations && Object.keys(annotations).length) obj.annotations = annotations;\n    rt.push(obj);\n  }\n  return rt;\n}\nfunction parseInlineRichText(line) {\n  const rt = [];\n  const pattern = /\\*\\*([^*]+)\\*\\*|\\[([^\\]]+)\\]\\(([^)]+)\\)/g;\n  let lastIdx = 0;\n  let match;\n  while ((match = pattern.exec(line)) !== null) {\n    if (match.index > lastIdx) rt.push(...makeTextRt(line.slice(lastIdx, match.index), {}));\n    if (match[1] !== undefined) {\n      rt.push(...makeTextRt(match[1], { bold: true }));\n    } else if (match[2] !== undefined) {\n      let txt = match[2];\n      const url = match[3];\n      while (txt.length > 0) {\n        rt.push({ type: 'text', text: { content: txt.slice(0, MAX_RT), link: { url } } });\n        txt = txt.slice(MAX_RT);\n      }\n    }\n    lastIdx = match.index + match[0].length;\n  }\n  if (lastIdx < line.length) rt.push(...makeTextRt(line.slice(lastIdx), {}));\n  return rt.length ? rt : [{ type: 'text', text: { content: '' } }];\n}\n\n// 3. markdownToBlocks\nfunction markdownToBlocks(md) {\n  const lines = md.split('\\n');\n  const blocks = [];\n  for (const rawLine of lines) {\n    const line = rawLine.trimEnd();\n    if (line.startsWith('## ')) {\n      blocks.push({ object: 'block', type: 'heading_2', heading_2: { rich_text: parseInlineRichText(line.slice(3).trim()) } });\n    } else if (line.startsWith('### ')) {\n      blocks.push({ object: 'block', type: 'heading_3', heading_3: { rich_text: parseInlineRichText(line.slice(4).trim()) } });\n    } else if (line.startsWith('# ')) {\n      blocks.push({ object: 'block', type: 'heading_1', heading_1: { rich_text: parseInlineRichText(line.slice(2).trim()) } });\n    } else if (/^[-*] /.test(line)) {\n      blocks.push({ object: 'block', type: 'bulleted_list_item', bulleted_list_item: { rich_text: parseInlineRichText(line.replace(/^[-*] /, '').trim()) } });\n    } else if (/^\\d+\\. /.test(line)) {\n      blocks.push({ object: 'block', type: 'numbered_list_item', numbered_list_item: { rich_text: parseInlineRichText(line.replace(/^\\d+\\. /, '').trim()) } });\n    } else if (line.trim() === '---') {\n      blocks.push({ object: 'block', type: 'divider', divider: {} });\n    } else if (line.startsWith('> ')) {\n      blocks.push({ object: 'block', type: 'quote', quote: { rich_text: parseInlineRichText(line.slice(2).trim()) } });\n    } else if (line.trim() !== '') {\n      blocks.push({ object: 'block', type: 'paragraph', paragraph: { rich_text: parseInlineRichText(line.trim()) } });\n    }\n  }\n  return blocks;\n}\n\n// 4. Split into chunks of 100\nconst CHUNK = 100;\nconst allBlocks = markdownToBlocks(afterJsonBlock);\nconst chunks = [];\nfor (let i = 0; i < allBlocks.length; i += CHUNK) chunks.push(allBlocks.slice(i, i + CHUNK));\n\n// 5. Notion property builders\nconst ms = arr => ({ multi_select: (Array.isArray(arr) ? arr : []).map(n => ({ name: String(n).slice(0, 100) })) });\nconst sel = n => ({ select: n ? { name: String(n).slice(0, 100) } : null });\nconst cb = v => ({ checkbox: !!v });\nconst rt = t => ({ rich_text: [{ type: 'text', text: { content: String(t || '').slice(0, 2000) } }] });\n\nconst notionProperties = {\n  'Name': { title: [{ text: { content: dateInfo.pageTitle } }] },\n  'Date': { date: { start: dateInfo.isoDate } },\n  'Category': ms(metadata.category),\n  'Topics': ms(metadata.topics),\n  'Providers': ms(metadata.providers),\n  'Featured Models': ms(metadata.featured_models),\n  'Importance': sel(metadata.importance),\n  'Report Type': sel('Daily'),\n  'Summary': rt(metadata.summary),\n  'New Model Released': cb(metadata.new_model_released),\n  'Pricing Changed': cb(metadata.pricing_changed),\n  'Open Source': cb(metadata.open_source),\n  'Free Promotion': cb(metadata.free_promotion),\n  'Worth Installing': cb(metadata.worth_installing),\n  'Best Coding Model': sel(metadata.best_coding_model),\n  'Best Reasoning Model': sel(metadata.best_reasoning_model),\n  'Best Local Model': sel(metadata.best_local_model),\n  'Best Value API': sel(metadata.best_value_api),\n  'Biggest Release': sel(metadata.biggest_release)\n};\n\n// 6. Extract executive summary + first 3 bullets for Slack\nlet execSummary = '';\nconst execMatch = afterJsonBlock.match(/## Executive Summary[\\s\\S]*?(?=\\n## |$)/);\nif (execMatch) {\n  execSummary = execMatch[0].replace('## Executive Summary', '').trim().split('\\n').find(l => l.trim() && !l.startsWith('#') && !l.startsWith('-')) || '';\n}\nconst bullets = [];\nfor (const line of afterJsonBlock.split('\\n')) {\n  if (/^[-*] /.test(line)) { bullets.push(line.replace(/^[-*] /, '').trim()); if (bullets.length >= 3) break; }\n}\n\n// 7. Generate SSH Command for Node 10 (base64-safe)\nconst b64 = Buffer.from(afterJsonBlock).toString('base64');\nconst sshCommand = `mkdir -p /home/ubuntu/reports && python3 -c \"import base64; open('/home/ubuntu/reports/${dateInfo.isoDate}.md','w').write(base64.b64decode('${b64}').decode('utf-8'))\" && find /home/ubuntu/reports/ -name '*.md' -mtime +30 -delete && echo 'Saved: /home/ubuntu/reports/${dateInfo.isoDate}.md'`;\n\nreturn [{ json: { notionProperties, blockChunks: chunks, fullMarkdown: afterJsonBlock, importance: metadata.importance || 'Medium', execSummary: execSummary.slice(0, 500), top3Bullets: bullets, chunkCount: chunks.length, totalBlocks: allBlocks.length, sshCommand } }];"
+      },
+      "id": "f632a0c6-7c25-4251-9239-9f66ab0ef74e",
+      "name": "Node 7: Parse + markdownToBlocks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2022-06-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"parent\": { \"database_id\": $env.NOTION_DATABASE_ID }, \"properties\": $json.notionProperties } }}",
+        "options": {}
+      },
+      "id": "942b181b-5017-43f9-87e9-8d2a3cfeab36",
+      "name": "Node 8: Create Notion Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "WEOBIP0aCADOUPNY",
+          "name": "Notion API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const pageData = $('Node 8: Create Notion Page').first().json;\nconst pageId = pageData.id;\nif (!pageId) throw new Error('No page_id from Node 8: ' + JSON.stringify(pageData).slice(0, 200));\nconst token = $env.NOTION_INTEGRATION_TOKEN || '';\nif (!token) throw new Error('NOTION_INTEGRATION_TOKEN is missing from environment');\nconst notionAuthHeader = token.startsWith('Bearer ') ? token : 'Bearer ' + token;\nconst chunks = $('Node 7: Parse + markdownToBlocks').first().json.blockChunks || [];\n\nasync function appendChunk(chunk) {\n  return await this.helpers.httpRequest({\n    method: 'PATCH',\n    url: `https://api.notion.com/v1/blocks/${pageId}/children`,\n    headers: { 'Authorization': notionAuthHeader, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },\n    body: { children: chunk },\n    timeout: 30000\n  });\n}\n\nconst results = [];\nfor (let i = 0; i < chunks.length; i++) {\n  let success = false; let lastErr = null;\n  for (let attempt = 1; attempt <= 3; attempt++) {\n    try {\n      await appendChunk.call(this, chunks[i]);\n      results.push({ chunk: i + 1, status: 'ok', blocks: chunks[i].length });\n      success = true; break;\n    } catch (err) {\n      lastErr = err.response?.data?.message || err.message;\n      if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 2000));\n    }\n  }\n  if (!success) results.push({ chunk: i + 1, status: 'error', error: lastErr, blocks: chunks[i].length });\n  if (i < chunks.length - 1) await new Promise(r => setTimeout(r, 300));\n}\n\nconst failedChunks = results.filter(r => r.status === 'error');\nif (failedChunks.length > 0) {\n  const details = failedChunks.map(f => `Chunk ${f.chunk}: ${f.error}`).join('; ');\n  throw new Error(`Failed to append ${failedChunks.length} of ${chunks.length} block chunks to Notion page. Details: ${details}`);\n}\n\nreturn [{ json: { pageId, notionPageUrl: pageData.url || `https://notion.so/${pageId.replace(/-/g, '')}`, chunksAppended: results.filter(r => r.status === 'ok').length, chunkErrors: failedChunks.length, totalChunks: chunks.length, chunkResults: results } }];"
+      },
+      "id": "a68e2caa-970e-4b36-ae10-c6b8a3078151",
+      "name": "Node 9: Append Block Chunks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "privateKey",
+        "command": "={{ $('Node 7: Parse + markdownToBlocks').first().json.sshCommand }}"
+      },
+      "id": "4d39fbaa-96d6-4d71-8d8f-5793b2131bf5",
+      "name": "Node 10: Save .md + Cleanup",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        1568,
+        0
+      ],
+      "credentials": {
+        "sshPrivateKey": {
+          "id": "kdwCvoTTiS54qDaE",
+          "name": "VPS SSH (ubuntu@159.13.36.234)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const date30DaysAgo = $('Node 2: Get Current Date').first().json.date30DaysAgo;\nconst notionAuthHeader = 'Bearer ' + $env.NOTION_INTEGRATION_TOKEN;\nconst dbId = $env.NOTION_DATABASE_ID;\n\nlet oldPages = [];\ntry {\n  const queryRes = await this.helpers.httpRequest({\n    method: 'POST',\n    url: `https://api.notion.com/v1/databases/${dbId}/query`,\n    headers: { 'Authorization': notionAuthHeader, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },\n    body: JSON.stringify({\n      filter: {\n        and: [\n          { property: 'Date', date: { before: date30DaysAgo } },\n          { property: 'Report Type', select: { equals: 'Daily' } }\n        ]\n      }\n    }),\n    timeout: 15000\n  });\n  const parsed = typeof queryRes === 'string' ? JSON.parse(queryRes) : queryRes;\n  oldPages = parsed.results || [];\n} catch (err) {\n  return [{ json: { archived: 0, errors: 1, message: 'Query failed: ' + err.message } }];\n}\n\nlet archived = 0; let errors = 0;\nfor (const page of oldPages) {\n  try {\n    await this.helpers.httpRequest({\n      method: 'PATCH',\n      url: `https://api.notion.com/v1/pages/${page.id}`,\n      headers: { 'Authorization': notionAuthHeader, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },\n      body: JSON.stringify({ archived: true }),\n      timeout: 10000\n    });\n    archived++;\n    await new Promise(r => setTimeout(r, 200));\n  } catch (err) { errors++; }\n}\n\nreturn [{ json: { oldPagesFound: oldPages.length, archived, errors, cutoffDate: date30DaysAgo } }];"
+      },
+      "id": "a6208f51-fd5b-4f61-9565-fc5c2c7bd3cc",
+      "name": "Node 11: Archive Old Notion Pages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => { const parsed = $('Node 7: Parse + markdownToBlocks').first().json; const appended = $('Node 9: Append Block Chunks').first().json; const dateInfo = $('Node 2: Get Current Date').first().json; const emojiMap = { 'Critical': '🔴', 'High': '🟠', 'Medium': '🟡', 'Low': '🟢' }; const emoji = emojiMap[parsed.importance] || '🟡'; const notionUrl = appended.notionPageUrl || 'https://notion.so'; const [y, m, d] = dateInfo.isoDate.split('-'); const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; const dateDisplay = `${parseInt(d)} ${months[parseInt(m)-1]} ${y}`; const bullets = (parsed.top3Bullets || []).map(b => `• ${b}`).join('\\n'); return { blocks: [ { type: 'header', text: { type: 'plain_text', text: `🧠 AI Daily Briefing · ${dateDisplay}` } }, { type: 'section', text: { type: 'mrkdwn', text: `━━━━━━━━━━━━━━━━━━━━━\\n${emoji} *Importance: ${parsed.importance || 'Medium'}*\\n\\n*Today's biggest story:*\\n${parsed.execSummary || 'See full report for details.'}\\n\\n*Key highlights:*\\n${bullets || '• See full report'}` } }, { type: 'actions', elements: [ { type: 'button', text: { type: 'plain_text', text: '👉 Full Report' }, url: notionUrl, style: 'primary' } ] } ] }; })() }}",
+        "options": {}
+      },
+      "id": "3e7895cd-d92b-4975-8472-60818cc67a31",
+      "name": "Node 12: Slack Morning Briefing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2016,
+        0
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $now.weekday }}",
+              "rightValue": 7,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d4852e98-3e48-4e10-80d4-516b9974a981",
+      "name": "Node 13: Is Sunday?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.notion.com/v1/databases/{{ $env.NOTION_DATABASE_ID }}/query",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2022-06-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"filter\": { \"property\": \"Report Type\", \"select\": { \"equals\": \"Daily\" } }, \"sorts\": [{ \"property\": \"Date\", \"direction\": \"descending\" }], \"page_size\": 7 } }}",
+        "options": {}
+      },
+      "id": "8de8009e-c991-4e86-8b78-23217f42214f",
+      "name": "Node 14: Query Past 7 Days",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        224,
+        192
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "WEOBIP0aCADOUPNY",
+          "name": "Notion API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $input.first().json.results || [];\nconst isoDate = $now.toFormat('yyyy-MM-dd');\nconst parts = isoDate.split('-');\nconst weekLabel = `${parts[2]}-${parts[1]}-${parts[0].slice(2)}`;\n\nconst summaries = results.map(p => {\n  const props = p.properties || {};\n  const titleProp = Object.values(props).find(v => v.type === 'title');\n  const title = titleProp?.title?.[0]?.plain_text || 'Untitled';\n  const summaryProp = props['Summary'];\n  const summary = summaryProp?.rich_text?.[0]?.plain_text || '';\n  const importanceProp = props['Importance'];\n  const importance = importanceProp?.select?.name || '';\n  return `- ${title}${importance ? ' [' + importance + ']' : ''}${summary ? ': ' + summary.slice(0, 200) : ''}`;\n}).join('\\n');\n\nconst prompt = `You are an AI industry analyst writing a WEEKLY summary report.\n\nToday is ${isoDate} (Sunday). Below are this week's 7 daily AI briefing summaries:\n\n${summaries || 'No daily reports found for this week.'}\n\nWrite a comprehensive Weekly AI Intelligence Report in Markdown.\n\nOUTPUT in this exact order:\n\nFirst: a JSON block (for Notion properties):\n\\`\\`\\`json\n{\n  \"summary\": \"2-3 sentence weekly wrap-up summary\",\n  \"category\": [\"Frontier Models\"],\n  \"topics\": [\"Frontier Models\", \"Open Source\"],\n  \"providers\": [\"OpenAI\"],\n  \"featured_models\": [\"GPT-5\"],\n  \"importance\": \"High\",\n  \"new_model_released\": false,\n  \"pricing_changed\": false,\n  \"open_source\": false,\n  \"free_promotion\": false,\n  \"worth_installing\": false,\n  \"best_coding_model\": \"\",\n  \"best_reasoning_model\": \"\",\n  \"best_local_model\": \"\",\n  \"best_value_api\": \"\",\n  \"biggest_release\": \"\"\n}\n\\`\\`\\`\n\nThen the weekly summary report body:\n## Weekly Executive Summary\nThe 5 biggest stories of the week.\n## Top Model Releases This Week\nAll frontier and open-source models launched.\n## Biggest Pricing Changes\nAny pricing moves worth noting.\n## Coding Tool Updates\nUpdates to Cursor, Claude Code, Gemini CLI, Codex, Windsurf, etc.\n## Best Picks This Week\n- Best Coding Model of the week\n- Best Reasoning Model of the week\n- Best Local Model of the week\n- Best Value API of the week\n## Biggest Disappointment\nAny hyped releases that underdelivered.\n## Next Week Predictions\n2-3 data-driven predictions based on this week's trends.\n\nRules: Be concise, specific, no filler. Use **bold** for model names. Use bullet lists. No markdown tables.`;\n\nreturn [{ json: { prompt, weekLabel } }];"
+      },
+      "id": "0bf95783-6885-4254-9575-37870811665d",
+      "name": "Node 15: Build Weekly Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"model\": \"openrouter/free\", \"messages\": [ { \"role\": \"user\", \"content\": $json.prompt } ], \"temperature\": 0.3 } }}",
+        "options": {}
+      },
+      "id": "33c6764d-9fb7-47f7-98a6-e833cf6d07a9",
+      "name": "Node 16: OpenRouter Weekly Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        672,
+        192
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hzDt5jzzkzvlfGlb",
+          "name": "OpenRouter API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst fullText = response.choices?.[0]?.message?.content || '';\nconst weekLabel = $('Node 15: Build Weekly Prompt').first().json.weekLabel;\nif (!fullText) throw new Error('Node 16 returned empty content from AI');\n\nconst jsonFenceMatch = fullText.match(/```json([\\s\\S]*?)```/);\nlet metadata = {};\nif (jsonFenceMatch) {\n  try { metadata = JSON.parse(jsonFenceMatch[1].trim()); } catch (e) { metadata = { parseError: e.message }; }\n}\nconst afterJsonBlock = jsonFenceMatch ? fullText.slice(fullText.indexOf(jsonFenceMatch[0]) + jsonFenceMatch[0].length).trim() : fullText.trim();\n\n// Inline rich_text parser\nconst MAX_RT = 1800;\nfunction makeTextRt(content, annotations) {\n  const rt = [];\n  let remaining = content;\n  while (remaining.length > 0) {\n    const chunk = remaining.slice(0, MAX_RT);\n    remaining = remaining.slice(MAX_RT);\n    const obj = { type: 'text', text: { content: chunk } };\n    if (annotations && Object.keys(annotations).length) obj.annotations = annotations;\n    rt.push(obj);\n  }\n  return rt;\n}\nfunction parseInlineRichText(line) {\n  const rt = [];\n  const pattern = /\\*\\*([^*]+)\\*\\*|\\[([^\\]]+)\\]\\(([^)]+)\\)/g;\n  let lastIdx = 0;\n  let match;\n  while ((match = pattern.exec(line)) !== null) {\n    if (match.index > lastIdx) rt.push(...makeTextRt(line.slice(lastIdx, match.index), {}));\n    if (match[1] !== undefined) {\n      rt.push(...makeTextRt(match[1], { bold: true }));\n    } else if (match[2] !== undefined) {\n      let txt = match[2];\n      const url = match[3];\n      while (txt.length > 0) {\n        rt.push({ type: 'text', text: { content: txt.slice(0, MAX_RT), link: { url } } });\n        txt = txt.slice(MAX_RT);\n      }\n    }\n    lastIdx = match.index + match[0].length;\n  }\n  if (lastIdx < line.length) rt.push(...makeTextRt(line.slice(lastIdx), {}));\n  return rt.length ? rt : [{ type: 'text', text: { content: '' } }];\n}\n\n// Convert markdown to blocks\nfunction markdownToBlocks(md) {\n  const lines = md.split('\\n');\n  const blocks = [];\n  for (const rawLine of lines) {\n    const line = rawLine.trimEnd();\n    if (line.startsWith('## ')) {\n      blocks.push({ object: 'block', type: 'heading_2', heading_2: { rich_text: parseInlineRichText(line.slice(3).trim()) } });\n    } else if (line.startsWith('### ')) {\n      blocks.push({ object: 'block', type: 'heading_3', heading_3: { rich_text: parseInlineRichText(line.slice(4).trim()) } });\n    } else if (line.startsWith('# ')) {\n      blocks.push({ object: 'block', type: 'heading_1', heading_1: { rich_text: parseInlineRichText(line.slice(2).trim()) } });\n    } else if (/^[-*] /.test(line)) {\n      blocks.push({ object: 'block', type: 'bulleted_list_item', bulleted_list_item: { rich_text: parseInlineRichText(line.replace(/^[-*] /, '').trim()) } });\n    } else if (/^\\d+\\. /.test(line)) {\n      blocks.push({ object: 'block', type: 'numbered_list_item', numbered_list_item: { rich_text: parseInlineRichText(line.replace(/^\\d+\\. /, '').trim()) } });\n    } else if (line.trim() === '---') {\n      blocks.push({ object: 'block', type: 'divider', divider: {} });\n    } else if (line.startsWith('> ')) {\n      blocks.push({ object: 'block', type: 'quote', quote: { rich_text: parseInlineRichText(line.slice(2).trim()) } });\n    } else if (line.trim() !== '') {\n      blocks.push({ object: 'block', type: 'paragraph', paragraph: { rich_text: parseInlineRichText(line.trim()) } });\n    }\n  }\n  return blocks;\n}\n\nconst CHUNK = 100;\nconst allBlocks = markdownToBlocks(afterJsonBlock);\nconst chunks = [];\nfor (let i = 0; i < allBlocks.length; i += CHUNK) chunks.push(allBlocks.slice(i, i + CHUNK));\n\nconst ms = arr => ({ multi_select: (Array.isArray(arr) ? arr : []).map(n => ({ name: String(n).slice(0, 100) })) });\nconst sel = n => ({ select: n ? { name: String(n).slice(0, 100) } : null });\nconst cb = v => ({ checkbox: !!v });\nconst rt = t => ({ rich_text: [{ type: 'text', text: { content: String(t || '').slice(0, 2000) } }] });\n\nconst isoDate = $now.toFormat('yyyy-MM-dd');\n\nconst notionProperties = {\n  'Name': { title: [{ text: { content: `Weekly-AI-Report-${weekLabel}` } }] },\n  'Date': { date: { start: isoDate } },\n  'Category': ms(metadata.category),\n  'Topics': ms(metadata.topics),\n  'Providers': ms(metadata.providers),\n  'Featured Models': ms(metadata.featured_models),\n  'Importance': sel(metadata.importance || 'High'),\n  'Report Type': sel('Weekly'),\n  'Summary': rt(metadata.summary),\n  'New Model Released': cb(metadata.new_model_released),\n  'Pricing Changed': cb(metadata.pricing_changed),\n  'Open Source': cb(metadata.open_source),\n  'Free Promotion': cb(metadata.free_promotion),\n  'Worth Installing': cb(metadata.worth_installing),\n  'Best Coding Model': sel(metadata.best_coding_model),\n  'Best Reasoning Model': sel(metadata.best_reasoning_model),\n  'Best Local Model': sel(metadata.best_local_model),\n  'Best Value API': sel(metadata.best_value_api),\n  'Biggest Release': sel(metadata.biggest_release)\n};\n\nconst notionAuthHeader = 'Bearer ' + $env.NOTION_INTEGRATION_TOKEN;\nconst dbId = $env.NOTION_DATABASE_ID;\n\n// 1. Create page\nconst pageRes = await this.helpers.httpRequest({\n  method: 'POST',\n  url: 'https://api.notion.com/v1/pages',\n  headers: { 'Authorization': notionAuthHeader, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },\n  body: JSON.stringify({ parent: { database_id: dbId }, properties: notionProperties }),\n  timeout: 30000\n});\nconst parsedPage = typeof pageRes === 'string' ? JSON.parse(pageRes) : pageRes;\nconst pageId = parsedPage.id;\nif (!pageId) throw new Error('Failed to create weekly page in Notion');\n\n// 2. Append chunks sequentially\nconst results = [];\nfor (let i = 0; i < chunks.length; i++) {\n  let success = false;\n  for (let attempt = 1; attempt <= 3; attempt++) {\n    try {\n      await this.helpers.httpRequest({\n        method: 'PATCH',\n        url: `https://api.notion.com/v1/blocks/${pageId}/children`,\n        headers: { 'Authorization': notionAuthHeader, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },\n        body: JSON.stringify({ children: chunks[i] }),\n        timeout: 30000\n      });\n      results.push({ chunk: i + 1, status: 'ok' });\n      success = true; break;\n    } catch (err) {\n      if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 2000));\n    }\n  }\n  if (!success) results.push({ chunk: i + 1, status: 'error' });\n  if (i < chunks.length - 1) await new Promise(r => setTimeout(r, 300));\n}\n\nconst failedChunks = results.filter(r => r.status === 'error').length;\nif (failedChunks > 0) {\n  throw new Error(`Failed to append ${failedChunks} of ${chunks.length} block chunks to weekly Notion page.`);\n}\n\nreturn [{ \n  json: {\n    pageId,\n    notionPageUrl: parsedPage.url || `https://notion.so/${pageId.replace(/-/g, '')}`,\n    chunksAppended: results.filter(r => r.status === 'ok').length,\n    chunkErrors: failedChunks,\n    totalChunks: chunks.length\n  }\n}];"
+      },
+      "id": "2b25ff83-452c-4c4c-84b9-54c82afdadcd",
+      "name": "Node 17: Create Weekly Notion Page",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => {\n  const weeklyPage = $('Node 17: Create Weekly Notion Page').first().json;\n  const weekLabel = $('Node 15: Build Weekly Prompt').first().json.weekLabel;\n  const notionUrl = weeklyPage.notionPageUrl || `https://notion.so/${weeklyPage.pageId.replace(/-/g, '')}`;\n  return {\n    blocks: [\n      {\n        type: 'header',\n        text: { type: 'plain_text', text: `📊 Weekly AI Summary · ${weekLabel}` }\n      },\n      {\n        type: 'section',\n        text: {\n          type: 'mrkdwn',\n          text: `━━━━━━━━━━━━━━━━━━━━━\\n*The weekly AI intelligence wrap-up is ready.*\\n\\nInside this report:\\n• Weekly Executive Summary (top 5 stories)\\n• All model releases & pricing updates\\n• Coding tool updates & local recommendations\\n• Next week\\'s data-driven predictions` \n        }\n      },\n      {\n        type: 'actions',\n        elements: [\n          {\n            type: 'button',\n            text: { type: 'plain_text', text: '👉 View Weekly Report' },\n            url: notionUrl,\n            style: 'primary'\n          }\n        ]\n      }\n    ]\n  };\n})() }}",
+        "options": {}
+      },
+      "id": "f5639add-6f30-4694-beda-3f12d138b643",
+      "name": "Node 18: Slack Weekly Briefing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        192
+      ],
+      "continueOnFail": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Node 1: Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Node 2: Get Current Date",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Node 2: Get Current Date": {
+      "main": [
+        [
+          {
+            "node": "Node 3: Run Research Engine",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Node 13: Is Sunday?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Node 3: Run Research Engine": {
+      "main": [
+        [
+          {
+            "node": "Node 4: OpenRouter Models API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Node 4: OpenRouter Models API": {
+      "main": [
+        [
+          {
+            "node": "Node 5: Build Pricing Section",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Node 5: Build Pricing Section": {
+      "main": [
+        [
+          {
+            "node": "Node 6: AI Generate Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Node 6: AI Generate Report": {
+      "main": [
+        [
+          {
+            "node": "Node 7: Parse + markdownToBlocks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Node 7: Parse + markdownToBlocks": {
+      "main": [
+        [
+          {
+            "node": "Node 8: Create Notion Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Node 8: Create Notion Page": {
+      "main": [
+        [
+          {
+            "node": "Node 9: Append Block Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Node 9: Append Block Chunks": {
+      "main": [
+        [
+          {
+            "node": "Node 10: Save .md + Cleanup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Node 10: Save .md + Cleanup": {
+      "main": [
+        [
+          {
+            "node": "Node 11: Archive Old Notion Pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Node 11: Archive Old Notion Pages": {
+      "main": [
+        [
+          {
+            "node": "Node 12: Slack Morning Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Node 13: Is Sunday?": {
+      "main": [
+        [
+          {
+            "node": "Node 14: Query Past 7 Days",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Node 14: Query Past 7 Days": {
+      "main": [
+        [
+          {
+            "node": "Node 15: Build Weekly Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Node 15: Build Weekly Prompt": {
+      "main": [
+        [
+          {
+            "node": "Node 16: OpenRouter Weekly Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Node 16: OpenRouter Weekly Report": {
+      "main": [
+        [
+          {
+            "node": "Node 17: Create Weekly Notion Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Node 17: Create Weekly Notion Page": {
+      "main": [
+        [
+          {
+            "node": "Node 18: Slack Weekly Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "977397f7-393a-4085-986d-ea9107fb12d0",
+  "meta": {
+    "instanceId": "7a9e1ea3d7ece72aabb2430d7a0fd844b15842806f5563ab1df7bba621d9297e"
+  },
+  "nodeGroups": [],
+  "id": "BTBsk7qUIpQWhWi3",
+  "tags": []
+}

@@ -1,0 +1,28 @@
+name: 💡 Feature or Workflow Request
+description: Propose a new workflow blueprint or an enhancement
+title: "[FEATURE] "
+labels: ["enhancement"]
+assignees: []
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: What is the goal of this feature/workflow?
+      description: Describe the core automation goal or problem this request solves.
+      placeholder: E.g., Add an automated email triage workflow using Gemini 1.5 Flash...
+    validations:
+      required: true
+  - type: textarea
+    id: nodes
+    attributes:
+      label: Proposed Nodes & Integrations
+      description: List the external services and API endpoints that would be utilized.
+    validations:
+      required: false
+  - type: textarea
+    id: logic
+    attributes:
+      label: Expected Input / Output Format
+      description: Describe the input trigger and what the final output should look like (Slack message format, Notion database columns, etc.).
+    validations:
+      required: true

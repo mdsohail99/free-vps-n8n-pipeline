@@ -1,0 +1,61 @@
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.29.10
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:5678/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    ports:
+      # If you have a domain, keep 127.0.0.1 (access via Caddy HTTPS).
+      # If you DON'T have a domain, make ALL of these changes together:
+      #   1. Change this line to "5678:5678"
+      #   2. Set N8N_PROTOCOL=http in .env
+      #   3. Set N8N_SECURE_COOKIE=false in .env
+      #   4. Set WEBHOOK_URL=http://YOUR_SERVER_IP:5678/ in .env
+      # See install_with_ai_agent.md, Phase 5 step 6, for the full walkthrough.
+      - "127.0.0.1:5678:5678"
+    environment:
+      - N8N_HOST=${N8N_HOST}
+      - N8N_PROTOCOL=${N8N_PROTOCOL:-https}
+      - N8N_PORT=5678
+      - WEBHOOK_URL=${WEBHOOK_URL}
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-UTC}
+      - TZ=${GENERIC_TIMEZONE:-UTC}
+      - N8N_SECURE_COOKIE=${N8N_SECURE_COOKIE:-true}
+      - NOTION_DATABASE_ID=${NOTION_DATABASE_ID}
+      - NOTION_INTEGRATION_TOKEN=${NOTION_INTEGRATION_TOKEN}
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=${N8N_BLOCK_ENV_ACCESS_IN_NODE:-false}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - n8n_net
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - N8N_HOST=${N8N_HOST}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - n8n_net
+    depends_on:
+      n8n:
+        condition: service_healthy
+
+volumes:
+  n8n_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  n8n_net:

@@ -1,0 +1,1 @@
+# No external dependencies — all sources use Python stdlib only.

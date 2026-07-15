@@ -1,0 +1,49 @@
+# Environment & secrets
+.env
+*.key
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+
+# Logs
+*.log
+
+# Credentials (generic)
+credentials.json
+
+# Research engine artifacts
+research-engine/data/
+research-engine/reports/
+
+# Docker volumes
+n8n_data/
+caddy_data/
+caddy_config/
+
+# Firewall regression test (internal security testing)
+tests/
+
+# Node & Playwright local testing dependencies
+node_modules/
+package.json
+package-lock.json
+
