@@ -195,6 +195,25 @@ async function main() {
   assert.match(node6Body.messages[0].content, /RESEARCH DATA/);
   pass("Node 6 OpenRouter daily request body");
 
+  // Deals path: Node 3 stdout now carries the ===DEALS=== separator + scanner output.
+  outputs.set("Node 3: Run Research Engine", {
+    stdout: [
+      "# Research Results",
+      "- **Mock model release**",
+      "  URL: https://example.com/mock-model",
+      "===DEALS===",
+      "## 🔥 AI Deals, Pricing & Launch Intelligence",
+      "> Scanned 2026-07-12 07:00 UTC — 28 official sources — 2 items flagged",
+      "### New This Run (not reported in previous runs)",
+      "- **[OpenAI]** — [matched: free credits] — **Mock free credits promo** — https://openai.com/mock — Unknown",
+    ].join("\n"),
+  });
+  const node6DealsBody = evaluateExpression(getNode("Node 6: AI Generate Report").parameters.jsonBody);
+  assert.match(node6DealsBody.messages[0].content, /DEALS & LAUNCH INTELLIGENCE DATA/);
+  assert.match(node6DealsBody.messages[0].content, /free credits promo/);
+  assert.match(node6DealsBody.messages[0].content, /No significant discounts or launch promotions detected today\./);
+  pass("Node 6 deals data injection (===DEALS=== separator)");
+
   const mockDailyAi = {
     choices: [
       {
@@ -237,6 +256,70 @@ async function main() {
   assert.match(parsedDaily.sshCommand, /\/home\/ubuntu\/reports\//);
   outputs.set("Node 7: Parse + markdownToBlocks", parsedDaily);
   pass("Node 7 daily AI parsing and Notion block conversion");
+
+  // Deals path: AI response includes the deals section + final summary.
+  const mockDailyAiDeals = {
+    choices: [
+      {
+        message: {
+          content: [
+            "```json",
+            JSON.stringify({
+              summary: "Mock daily summary with a deal.",
+              importance: "High",
+              promotions_found: true,
+              top_deal: "Mock Credits 50% off",
+            }, null, 2),
+            "```",
+            "## Executive Summary",
+            "Mock daily report paragraph.",
+            "- First highlight",
+            "- Second highlight",
+            "## 🔥 AI Deals, Pricing & Launch Intelligence",
+            "- **OpenAI** | Mock Credits | Original Price: $20 | Discounted Price: $10 | Percentage Saved: 50% | ...",
+            "### Launch & Product Intelligence",
+            "- Mock new frontier coding model announced",
+            "- Top Money Saving Opportunity Today: Mock Credits 50% off for 10 more days",
+            "- Estimated Savings: $10",
+            "- Recommendation: Grab it before it expires",
+            "- Should I switch today? Yes — Reason: half price on the plan you already use",
+            "## Sources",
+            "- https://example.com/mock-model",
+          ].join("\n"),
+        },
+      },
+    ],
+  };
+  const parsedDailyDeals = await runCodeNode("Node 7: Parse + markdownToBlocks", mockDailyAiDeals);
+  assert.equal(parsedDailyDeals.dealLine, "Mock Credits 50% off for 10 more days");
+  assert.equal(parsedDailyDeals.promotions_found, true);
+  assert.equal(parsedDailyDeals.top_deal, "Mock Credits 50% off");
+  pass("Node 7 deals section extraction (Top Money Saving Opportunity)");
+
+  // Deals path: fallback sentence -> dealLine must be empty.
+  const mockDailyAiNoDeals = {
+    choices: [
+      {
+        message: {
+          content: [
+            "```json",
+            JSON.stringify({ summary: "No deals today.", importance: "Low", promotions_found: false, top_deal: "" }, null, 2),
+            "```",
+            "## Executive Summary",
+            "Mock daily report paragraph.",
+            "## 🔥 AI Deals, Pricing & Launch Intelligence",
+            "No significant discounts or launch promotions detected today.",
+            "## Sources",
+            "- https://example.com/mock-model",
+          ].join("\n"),
+        },
+      },
+    ],
+  };
+  const parsedDailyNoDeals = await runCodeNode("Node 7: Parse + markdownToBlocks", mockDailyAiNoDeals);
+  assert.equal(parsedDailyNoDeals.dealLine, "");
+  assert.equal(parsedDailyNoDeals.promotions_found, false);
+  pass("Node 7 deals fallback (dealLine empty on no deals)");
 
   const node8Body = evaluateExpression(getNode("Node 8: Create Notion Page").parameters.jsonBody, {
     json: parsedDaily,
@@ -290,6 +373,15 @@ async function main() {
   assert.equal(dailySlack.blocks[0].type, "header");
   assert.equal(dailySlack.blocks[2].elements[0].url, "https://notion.so/mock-daily");
   pass("Node 12 Slack daily Block Kit payload");
+
+  // Deals path: when a top deal exists, the Slack card surfaces it.
+  const savedNode7 = outputs.get("Node 7: Parse + markdownToBlocks");
+  outputs.set("Node 7: Parse + markdownToBlocks", { ...parsedDailyDeals, notionPageUrl: "https://notion.so/mock-daily" });
+  const dailySlackDeals = evaluateExpression(getNode("Node 12: Slack Morning Briefing").parameters.jsonBody);
+  assert.match(dailySlackDeals.blocks[0].text.text, /^🔥 /);
+  assert.match(dailySlackDeals.blocks[1].text.text, /Top Deal:\* Mock Credits 50% off for 10 more days/);
+  outputs.set("Node 7: Parse + markdownToBlocks", savedNode7);
+  pass("Node 12 Slack deals card (🔥 Top Deal)");
 
   const sundayCondition = getNode("Node 13: Is Sunday?").parameters.conditions.conditions[0];
   assert.equal(sundayCondition.leftValue, "={{ $now.weekday }}");

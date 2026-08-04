@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+- 🔥 **AI Deals, Pricing & Launch Intelligence** (`research-engine/deals.py` + `deals_core.py` + `sources/deals_registry.py`): Daily scanner of 28 official sources across 10 AI coding platforms (Cursor, Qoder, OpenCode, Claude Code, OpenAI/Codex, Google AI Studio, Windsurf, Kiro, GitHub Copilot, Amazon Q Developer) and 12 model providers (OpenAI, Anthropic, Google DeepMind, Qwen, QwenCloud, Z.ai, DeepSeek, Moonshot AI, MiniMax, xAI, Mistral, Cohere). Flags 29 promotion keywords plus launch signals (new models, benchmarks, context windows, agent products, IDE integrations) with day-over-day state-file dedupe. Optional `GITHUB_TOKEN` env var raises GitHub API rate limit from 60 → 5000 req/hr.
+- 🧠 **New briefing section in the AI Daily Briefing workflow** (`ai_daily_briefing_workflow.json`, Nodes 3/6/7/12): The 7AM run now also executes the deals scanner over SSH; the LLM prompt generates structured 17-field promotion cards with 🚨 EXPIRING SOON (≤7 days) / 🔥 LAST CHANCE (≤48 hrs) markers, launch & product intelligence bullets, a "Top Money Saving Opportunity" final summary, and a no-filler fallback line; the Slack morning card surfaces the top deal when one exists. No new Notion properties were added.
+- 🧪 **Deals scanner unit tests** (`research-engine/tests/test_deals.py`): 34 tests covering keyword detection, launch signals, RSS/Atom/GitHub/HTML parsing, date normalization, state-file dedupe, registry coverage of all 22 platforms, and GitHub-token header scoping.
+- 🔧 **`.gitignore` fix**: anchored `tests/` to `/tests/` so `research-engine/tests/` is tracked while root firewall tests stay ignored.
+
+---
+
 ## [1.0.0] - 2026-07-15
 
 ### Added

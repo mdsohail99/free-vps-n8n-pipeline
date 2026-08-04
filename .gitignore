@@ -39,11 +39,17 @@ n8n_data/
 caddy_data/
 caddy_config/
 
-# Firewall regression test (internal security testing)
-tests/
+# Firewall regression test (internal security testing) — root-level only
+/tests/
 
 # Node & Playwright local testing dependencies
 node_modules/
 package.json
 package-lock.json
+
+# Personal scripts/tools folder
+scripts/
+
+# Launch intelligence local runtime logs & configurations
+runtime/
 
