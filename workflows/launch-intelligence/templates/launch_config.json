@@ -1,0 +1,60 @@
+[
+  {
+    "id": "post_1",
+    "platform": "twitter",
+    "url": "https://x.com/username/status/1234567890",
+    "title": "Initial tweet sharing the launch",
+    "published_at": "2026-07-15T08:00:00Z"
+  },
+  {
+    "id": "post_2",
+    "platform": "twitter",
+    "url": "https://x.com/username/status/1234567891",
+    "title": "Follow-up thread with feature highlights and demo link",
+    "published_at": "2026-07-15T09:30:00Z"
+  },
+  {
+    "id": "post_3",
+    "platform": "linkedin",
+    "url": "https://www.linkedin.com/feed/update/urn:li:ugcPost:1234567890",
+    "title": "LinkedIn launch post",
+    "published_at": "2026-07-15T10:00:00Z"
+  },
+  {
+    "id": "post_4",
+    "platform": "reddit",
+    "subreddit": "r/n8n",
+    "url": "https://www.reddit.com/r/n8n/comments/...",
+    "title": "Showcase post in the n8n community",
+    "published_at": "2026-07-15T12:00:00Z"
+  },
+  {
+    "id": "post_5",
+    "platform": "reddit",
+    "subreddit": "r/homelab",
+    "url": "https://www.reddit.com/r/homelab/comments/...",
+    "title": "Self-hosting walkthrough for homelab enthusiasts",
+    "published_at": "2026-07-15T14:00:00Z"
+  },
+  {
+    "id": "post_6",
+    "platform": "hackernews",
+    "url": "https://news.ycombinator.com/item?id=12345678",
+    "title": "Show HN: launch submission",
+    "published_at": "2026-07-15T16:00:00Z"
+  },
+  {
+    "id": "post_7",
+    "platform": "devto",
+    "url": "https://dev.to/username/launch-announcement",
+    "title": "DEV Community launch article",
+    "published_at": "2026-07-15T18:00:00Z"
+  },
+  {
+    "id": "post_8",
+    "platform": "medium",
+    "url": "https://medium.com/@username/launch-announcement",
+    "title": "Medium launch article",
+    "published_at": "2026-07-15T20:00:00Z"
+  }
+]

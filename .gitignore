@@ -48,7 +48,8 @@ package.json
 package-lock.json
 
 # Personal scripts/tools folder
-scripts/
+# Root-level personal scripts only (NOT workflows/*/scripts/)
+/scripts/
 
 # Launch intelligence local runtime logs & configurations
 runtime/
