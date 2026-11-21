@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """research.py — lightweight research engine for AI news gathering.
 
-Fetches from public sources (HackerNews, Techmeme, Reddit) with no API keys
-required. Designed to be called by n8n via SSH for the AI Daily Briefing workflow.
+Fetches from public sources (HackerNews, Techmeme, official AI blogs/preprints)
+with no API keys required. Designed to be called by n8n via SSH for the AI
+Daily Briefing workflow.
 
 Usage:
     python3 research.py "AI LLM models news" --emit=compact --quick
-    python3 research.py "OpenAI" --sources=hn,reddit
+    python3 research.py "OpenAI" --sources=hn,feeds
     python3 research.py --list-sources
 """
 
@@ -73,8 +74,8 @@ def main():
                         help="Output format")
     parser.add_argument("--quick", action="store_true",
                         help="Skip slower sources (web fetches)")
-    parser.add_argument("--sources", default="hn,techmeme,reddit",
-                        help="Comma-separated sources: hn,techmeme,reddit,web")
+    parser.add_argument("--sources", default="hn,techmeme,feeds",
+                        help="Comma-separated sources: hn,techmeme,feeds")
     parser.add_argument("--list-sources", action="store_true",
                         help="List available sources and exit")
 

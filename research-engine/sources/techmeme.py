@@ -2,6 +2,8 @@ import re
 from html.parser import HTMLParser
 from urllib.request import Request, urlopen
 
+from .relevance import is_ai_relevant
+
 TECHMEME_RSS = "https://techmeme.com/feed.xml?format=xml"
 
 class _TextExtract(HTMLParser):
@@ -40,8 +42,12 @@ def fetch(query: str, limit: int = 40) -> list[dict]:
         link = link_m.group(1).strip() if link_m else ""
         pub_date = date_m.group(1).strip() if date_m else ""
 
-        ql = query.lower()
-        if ql and not any(w in title.lower() or w in desc.lower() for w in ql.split()):
+        q_words = re.findall(r"[a-z0-9.]+", query.lower())
+        if q_words and not any(
+            re.search(rf"\b{re.escape(w)}\b", f"{title} {desc}".lower()) for w in q_words
+        ):
+            continue
+        if is_ai_relevant(query) and not is_ai_relevant(title, desc):
             continue
 
         results.append({

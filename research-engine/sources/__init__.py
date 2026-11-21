@@ -1,23 +1,21 @@
-from . import hackernews, techmeme, reddit, web
+from . import hackernews, techmeme, feeds
 
 SOURCES = {
     "hn": hackernews,
     "hackernews": hackernews,
     "techmeme": techmeme,
-    "reddit": reddit,
-    "web": web,
+    "feeds": feeds,
 }
 
 SOURCE_NAMES = {
     "hn": "HackerNews",
     "techmeme": "Techmeme",
-    "reddit": "Reddit",
-    "web": "Web Fetch",
+    "feeds": "Official AI Blogs & Preprints",
 }
 
 def fetch_all(query: str, enabled: list[str] | None = None) -> dict[str, list[dict]]:
     if enabled is None:
-        enabled = ["hn", "techmeme", "reddit"]
+        enabled = ["hn", "techmeme", "feeds"]
     results = {}
     for name in enabled:
         mod = SOURCES.get(name)
