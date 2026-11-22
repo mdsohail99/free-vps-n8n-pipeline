@@ -4,19 +4,23 @@
 Usage:
   python3 free_models.py            # one line per model in the fallback chain
   python3 free_models.py --json     # machine-readable
+  python3 free_models.py --snapshot # write catalog/YYYY-MM-DD.json for the weekly diff
   python3 free_models.py --self-check
 
 Mirrors the scan in Node 5 of the n8n workflow. The workflow is the runtime
 version (it reuses the catalog it already fetches); this is the eyeball version
-for "is a stealth model live today?".
+for "is a stealth model live today?" and the snapshot writer for the weekly diff.
 """
 import json
+import os
 import sys
 import urllib.request
+from datetime import datetime, timezone
 
 CATALOG = "https://openrouter.ai/api/v1/models"
 KNOWN_GOOD = ["nvidia/nemotron-3.5-super-vl:free", "nvidia/nemotron-3.5-lightning:free"]
 CHAIN_LIMIT = 4
+CATALOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "catalog")
 
 
 def _is_text(m):
@@ -48,6 +52,34 @@ def fetch():
         return json.loads(r.read()).get("data") or []
 
 
+def compact(models):
+    """Only the fields the weekly diff needs, so a snapshot stays small."""
+    out = {}
+    for m in models:
+        mid = m.get("id")
+        if not mid:
+            continue
+        p = m.get("pricing") or {}
+        out[mid] = {
+            "name": m.get("name") or mid,
+            "prompt": float(p.get("prompt") or 0),
+            "completion": float(p.get("completion") or 0),
+            "ctx": m.get("context_length") or 0,
+            "created": m.get("created") or 0,
+        }
+    return out
+
+
+def write_snapshot(models, day=None):
+    """Write catalog/<day>.json. Returns the path."""
+    day = day or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    os.makedirs(CATALOG_DIR, exist_ok=True)
+    path = os.path.join(CATALOG_DIR, day + ".json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"day": day, "models": compact(models)}, f)
+    return path
+
+
 def _self_check():
     def m(mid, prompt="0", completion="0", ctx=1000000, out=("text",)):
         return {"id": mid, "context_length": ctx, "pricing": {"prompt": prompt, "completion": completion},
@@ -73,13 +105,23 @@ def _self_check():
 
     chain, _ = select([])
     assert chain == KNOWN_GOOD + ["openrouter/free"], chain
+
+    # Snapshot keeps only the fields the weekly diff reads.
+    snap = compact([{"id": "a/b", "name": "B", "context_length": 1000, "created": 5,
+                     "pricing": {"prompt": "0.000001", "completion": "0"}}, {"no_id": True}])
+    assert list(snap) == ["a/b"], snap
+    assert snap["a/b"] == {"name": "B", "prompt": 0.000001, "completion": 0.0, "ctx": 1000, "created": 5}, snap
+
     print("OK — free-model scan self-check passed")
 
 
 def main(argv):
     if "--self-check" in argv:
         return _self_check()
-    chain, stealth = select(fetch())
+    models = fetch()
+    if "--snapshot" in argv:
+        print("snapshot: " + write_snapshot(models))
+    chain, stealth = select(models)
     if "--json" in argv:
         print(json.dumps({"chain": chain, "stealth": stealth}, indent=2))
         return

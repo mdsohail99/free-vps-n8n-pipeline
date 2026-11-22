@@ -29,6 +29,9 @@ services:
       - NOTION_INTEGRATION_TOKEN=${NOTION_INTEGRATION_TOKEN}
       - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=${N8N_BLOCK_ENV_ACCESS_IN_NODE:-false}
+      # The JS task runner kills a task at this budget; a killed task restarts the
+      # whole workflow and posts every report twice (exec 314, 2026-11-21).
+      - N8N_RUNNERS_TASK_TIMEOUT=600
     volumes:
       - n8n_data:/home/node/.n8n
     networks:
