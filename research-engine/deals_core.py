@@ -16,50 +16,112 @@ import html as _html
 import json
 import os
 import re
+from datetime import date, datetime, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Detection keywords — EXACT list from the spec (case-insensitive substring match)
+# Detection keywords — stable public output schema
 # ─────────────────────────────────────────────────────────────────────────────
+# The previous list contained broad single tokens — "student", "startup",
+# "discount", "promo" — that substring-matched the *whole scraped page text* of
+# full blog indexes (e.g. OpenAI's news RSS) and emitted years-old marketing
+# posts as "deals". Those tokens are REMOVED. Every entry below is a phrase or
+# context-scoped term that indicates a real, actionable deal/launch/promo
+# signal (a coupon, a price cut, free credits, an active offer).
+#
+# Phrase matches are substring hits against PROMO_KEYWORDS; _PROMO_PATTERNS
+# catch near-variants a fixed list cannot enumerate (e.g. "75% off",
+# "free $50 credits"). Patterns are reported as their own keyword name.
 PROMO_KEYWORDS = [
     "90% off", "95% off", "98% off", "99% off", "launch promotion", "limited time",
     "free credits", "credits multiplier", "token multiplier", "bonus credits",
     "preview pricing", "beta pricing", "early access", "free trial", "extended trial",
     "student", "startup", "enterprise credits", "discount", "coupon", "promo",
-    "resource pack", "price drop", "price reduction", "usage multiplier",
-    "off peak", "night pricing", "happy hours", "weekend pricing",
+    "resource pack", "price drop", "price reduction", "usage multiplier", "off peak",
+    "night pricing", "happy hours", "weekend pricing",
 ]
+
+# Regex variants of the phrases above — reported only when no explicit phrase
+# already covered the concept (avoids noisy duplicates like "99% off" + "percent-off").
+_PROMO_PATTERNS = []
+
+# Keywords that describe an EVERGREEN offer — a source still advertising them
+# is a standing/recurring promo. Items carrying ONLY these survive the freshness
+# floor when dated (freshness exemption), matching the spec's "genuine recurring
+# promos still marked active". Note: a bare old blog post does NOT carry these —
+# the 2024/2025 OpenAI bloat matched "discount"/"student"/"startup"/"promo",
+# none of which are here.
+RECURRING_PROMO_KEYWORDS = frozenset({
+    "free credits", "bonus credits", "credits multiplier", "token multiplier",
+    "usage multiplier", "credit boost", "free trial", "extended trial",
+    "trial extension", "enterprise credits", "free tier", "free plan",
+    "free usage", "free api", "coupon", "coupon code", "promo code", "promo codes",
+    "resource pack", "off peak", "night pricing", "happy hours",
+    "weekend pricing", "price drop", "price cut", "price reduction",
+    "pay as you go", "per token pricing",
+})
+
+# Time-bound / actionable offer keywords — presence makes an item an ACTIVE deal
+# regardless of age (within the freshness window): expiring offers, coupons,
+# launch-day promos, price cuts, free credits/trials.
+_ACTIVE_DEAL_KEYWORDS = frozenset({
+    "90% off", "95% off", "98% off", "99% off", "launch promotion", "limited time",
+    "free credits", "credits multiplier", "token multiplier", "bonus credits",
+    "preview pricing", "beta pricing", "early access", "free trial", "extended trial",
+    "coupon", "promo", "price drop", "price reduction", "usage multiplier",
+})
+
+# Launch-signal keyword names that make a dated item an ACTIVE deal only when it
+# falls inside a short "hot" window (launch-day releases). See DEAL_HOT_DAYS.
+_LAUNCH_KEYWORDS_FOR_HOT = frozenset({
+    "new-model", "new-benchmark", "new-context-window",
+    "new-agent-product", "new-ide-integration", "release", "now-available",
+})
 
 # Launch-signal detection: non-promo, high-value intelligence. These fire on the
 # title (and summary) of an item, e.g. "Introducing Claude 4", "SWE-bench Pro",
 # "1M token context window", "Codex Agent", "VS Code integration".
+#
+# Precision rules:
+#  * proximity windows use `[^.!?\n]{0,N}` — a signal can NEVER span a sentence
+#    boundary. The old `.{0,N}` let "Introducing X ... model" match across
+#    unrelated sentences on a long scraped blog page (a false-positive source).
+#  * "new-model" now requires a concrete model identifier (gpt-*, claude *,
+#    gemini *, deepseek *, qwen *, ...) or the word "model" itself next to the
+#    launch verb — so "Introducing study mode in ChatGPT" or "Introducing
+#    OpenAI Japan" no longer fire.
 _LAUNCH_PATTERNS = [
     ("new-model", re.compile(
-        r"\b(?:new|introduc\w*|unveil\w*|launch\w*|releas\w*|debut\w*|present\w*|announc\w*)\b.{0,40}\bmodel\b",
+        r"\b(?:new|introduc\w*|unveil\w*|launch\w*|releas\w*|debut\w*|present\w*|announc\w*)\b"
+        r"[^.!?\n]{0,30}\b(?:model|foundation\s+model|gpt[-\w.]*|claude\s*\w+|gemini[-\w.]*|deepseek[-\w.]*|qwen\s*\w+)\b",
         re.I)),
     ("new-model", re.compile(
         r"\b(?:frontier|reasoning|preview|foundation)\s+model\b", re.I)),
     ("new-benchmark", re.compile(
-        r"\b(?:new|introduc\w*|releas\w*|launch\w*|unveil\w*|debut\w*)\b.{0,40}\bbenchmark\b",
+        r"\b(?:new|introduc\w*|releas\w*|launch\w*|unveil\w*|debut\w*)\b[^.!?\n]{0,30}\bbenchmark\b",
         re.I)),
     ("new-context-window", re.compile(
-        r"\b(?:new|extended|larger|bigger|expanded|longer|1m|2m|4m|10m)\b.{0,25}\bcontext\s+(?:window|length)\b",
+        r"\b(?:new|extended|larger|bigger|expanded|longer|1m|2m|4m|10m)\b[^.!?\n]{0,25}\bcontext\s+(?:window|length)\b",
         re.I)),
     ("new-context-window", re.compile(
-        r"\bcontext\s+(?:window|length)\b.{0,25}\b(?:new|extended|expanded|larger)\b",
+        r"\bcontext\s+(?:window|length)\b[^.!?\n]{0,25}\b(?:new|extended|expanded|larger)\b",
         re.I)),
     ("new-agent-product", re.compile(
-        r"\b(?:new|introduc\w*|unveil\w*|launch\w*|releas\w*|debut\w*)\b.{0,40}\bagent\b",
+        r"\b(?:new|introduc\w*|unveil\w*|launch\w*|releas\w*|debut\w*)\b[^.!?\n]{0,30}\bagent\b",
         re.I)),
     ("new-agent-product", re.compile(
         r"\b(?:coding|code|cli)\s+agent\b", re.I)),
     ("new-ide-integration", re.compile(
-        r"\b(?:new\s+)?(?:ide|vscode|vs\s*code|visual\s+studio(?:\s+code)?|jetbrains|intellij|pycharm|neovim|emacs)\b.{0,40}\b(?:integration|plugin|extension)\b",
+        r"\b(?:new\s+)?(?:ide|vscode|vs\s*code|visual\s+studio(?:\s+code)?|jetbrains|intellij|pycharm|neovim|emacs)\b"
+        r"[^.!?\n]{0,40}\b(?:integration|plugin|extension)\b",
         re.I)),
     ("new-ide-integration", re.compile(
-        r"\b(?:integration|plugin|extension)\b.{0,40}\b(?:ide|vscode|vs\s*code|visual\s+studio(?:\s+code)?|jetbrains|intellij|pycharm)\b",
+        r"\b(?:integration|plugin|extension)\b[^.!?\n]{0,40}\b(?:ide|vscode|vs\s*code|visual\s+studio(?:\s+code)?|jetbrains|intellij|pycharm)\b",
         re.I)),
+    ("release", re.compile(
+        r"\brelease[sd]?\b[^.!?\n]{0,12}\bv?\d+(?:\.\d+)+\b", re.I)),
+    ("now-available", re.compile(r"\bnow available\b", re.I)),
 ]
 
 
@@ -67,9 +129,25 @@ _LAUNCH_PATTERNS = [
 # Keyword detection
 # ─────────────────────────────────────────────────────────────────────────────
 def match_keywords(text):
-    """Return promo keywords present in ``text`` (case-insensitive substring match)."""
+    """Return promo keywords present in ``text`` (case-insensitive).
+
+    Phrase hits use substring matching against PROMO_KEYWORDS; _PROMO_PATTERNS
+    catch near-variants (e.g. "75% off", "free $50 credits") a fixed list cannot
+    enumerate. A pattern is reported only when no explicit phrase already
+    covered the same concept (no "99% off" + "percent-off" duplication).
+    """
     low = (text or "").lower()
     return [k for k in PROMO_KEYWORDS if k in low]
+
+
+def is_recurring_promo(keywords):
+    """True if the matched keywords indicate a still-valid evergreen offer.
+
+    Used to exempt genuine recurring promos from the freshness floor (the spec's
+    "EXCEPT ... still marked active"). Keywords like "student"/"discount" alone
+    are NOT recurring-evidence, so old marketing posts are not exempted.
+    """
+    return bool(set(keywords or []) & RECURRING_PROMO_KEYWORDS)
 
 
 def detect_launch_keywords(text):
@@ -93,6 +171,57 @@ def is_flagged(title, summary=""):
     """True if the item carries any promo or launch signal."""
     promo, launch = classify(title, summary)
     return bool(promo or launch)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Active-deal flagging (time-bound vs generic news)
+# ─────────────────────────────────────────────────────────────────────────────
+DEAL_HOT_DAYS = 3  # launch-day / expiring window: a dated launch inside this is active
+
+
+def compute_active_flag(keywords, date_str, ref_date=None, hot_days=DEAL_HOT_DAYS,
+                        expiry_date=None, current_signal=False,
+                        freshness_days=14):
+    """Return True if an item is a genuinely time-bound / actionable deal.
+
+    An item is an ACTIVE deal when EITHER:
+      * it carries a time-bound/actionable offer keyword (coupon, "% off",
+        "limited time", "price cut", "free credits", "free trial", ...)
+        and is fresh or has an explicit current signal, OR
+      * it is a launch signal (new-model / agent / release / now-available)
+        dated within ``hot_days`` of ``ref_date`` (launch-day releases).
+
+    Generic news ("new-ide-integration" from a month ago) is not an active deal.
+    """
+    if ref_date is None:
+        ref_date = datetime.now(timezone.utc).date()
+    if expiry_date and expiry_date != "Unknown":
+        try:
+            if date(*[int(x) for x in expiry_date[:10].split("-")]) < ref_date:
+                return False
+        except Exception:
+            pass
+    kw = set(keywords or [])
+    if kw & _ACTIVE_DEAL_KEYWORDS:
+        if current_signal:
+            return True
+        if not date_str or date_str in ("", "Unknown"):
+            return False
+        try:
+            item_date = date(*[int(x) for x in date_str[:10].split("-")])
+        except Exception:
+            return False
+        return 0 <= (ref_date - item_date).days <= freshness_days
+    if not (kw & _LAUNCH_KEYWORDS_FOR_HOT):
+        return False
+    if not date_str or date_str in ("", "Unknown"):
+        return False
+    try:
+        item_date = date(*[int(x) for x in date_str[:10].split("-")])
+    except Exception:
+        return False
+    days = (ref_date - item_date).days
+    return 0 <= days <= hot_days
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -277,6 +406,127 @@ def normalize_date(raw):
     return "Unknown"
 
 
+_EXPIRY_PATTERN = re.compile(
+    r"\b(?:expires?|ends?|ending|valid\s+through|available\s+through)\s*[:\-]?\s*"
+    r"(\d{4}-\d{2}-\d{2}|[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4})\b", re.I
+)
+_CURRENT_SIGNAL_PATTERN = re.compile(
+    r"\b(?:currently\s+available|ongoing|active\s+offer|"
+    r"valid\s+until|expires?|ends?|this\s+(?:week|month)|today)\b", re.I
+)
+
+
+def extract_expiry_date(text):
+    """Return an explicit offer end date from text, or ``Unknown``."""
+    match = _EXPIRY_PATTERN.search(text or "")
+    return normalize_date(match.group(1)) if match else "Unknown"
+
+
+def has_current_signal(text):
+    """Return whether text explicitly presents an offer as current."""
+    return bool(_CURRENT_SIGNAL_PATTERN.search(text or ""))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Freshness floor (drop stale items; keep fresh + still-active recurring promos)
+# ─────────────────────────────────────────────────────────────────────────────
+DEFAULT_FRESHNESS_DAYS = 14
+
+
+def is_fresh_date(date_str, ref_date, max_age_days=DEFAULT_FRESHNESS_DAYS):
+    """True if ``date_str`` (YYYY-MM-DD or 'Unknown') is within the window.
+
+    Unknown / unparseable / missing dates return True (we can't judge staleness,
+    so they are kept and sink to the bottom of the ordering). Boundary is
+    inclusive: an item exactly ``max_age_days`` old is still fresh.
+    """
+    if not date_str or date_str in ("", "Unknown", None):
+        return True
+    try:
+        item_date = date(*[int(x) for x in date_str[:10].split("-")])
+    except Exception:
+        return True
+    return (ref_date - item_date).days <= max_age_days
+
+
+def is_fresh(item, ref_date=None, max_age_days=DEFAULT_FRESHNESS_DAYS):
+    """True if an item passes the freshness floor.
+
+    An item marked ``active`` (a still-marked recurring promo / standing offer)
+    is exempt from the age drop regardless of date.
+    """
+    if ref_date is None:
+        ref_date = datetime.now(timezone.utc).date()
+    expiry = item.get("expiry_date")
+    if expiry and expiry != "Unknown":
+        try:
+            if date(*[int(x) for x in expiry[:10].split("-")]) < ref_date:
+                return False
+        except Exception:
+            pass
+    if item.get("active") and item.get("is_active_deal"):
+        return True
+    return is_fresh_date(item.get("date") or "", ref_date, max_age_days)
+
+
+def filter_fresh_items(items, ref_date=None, max_age_days=DEFAULT_FRESHNESS_DAYS):
+    """Keep only items that pass the freshness floor (order preserved)."""
+    if ref_date is None:
+        ref_date = datetime.now(timezone.utc).date()
+    return [it for it in items if is_fresh(it, ref_date=ref_date, max_age_days=max_age_days)]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-source crawl cap (limit blog-index bloat) + ordering
+# ─────────────────────────────────────────────────────────────────────────────
+DEFAULT_SOURCE_CAP = 10
+
+
+def cap_items_per_source(items, cap=DEFAULT_SOURCE_CAP):
+    """Keep at most ``cap`` items per source, newest first (Unknown dates last).
+
+    Applied AFTER the freshness floor so a full blog index only contributes its
+    most recent qualifying items per run.
+    """
+    if cap is None or cap <= 0:
+        return list(items)
+    grouped = {}
+    for item in items:
+        grouped.setdefault(item.get("source") or "", []).append(item)
+    out = []
+    for group in grouped.values():
+        ordered = sorted(group, key=lambda it: (
+            1 if it.get("active") or it.get("is_active_deal") else 0,
+            0 if (it.get("date") or "") in ("", "Unknown") else 1,
+            it.get("date") or "",
+            -(it.get("priority") or 2),
+            it.get("key") or "",
+        ), reverse=True)
+        out.extend(ordered[:cap])
+    return out
+
+
+def order_items(items):
+    """Rank items: active deals first, then newest date, then priority tier.
+
+    Ordering intent (all descending on the sort key):
+      1. active deal (is_active_deal) ahead of generic news;
+      2. dated items ahead of Unknown-date items;
+      3. newest date first;
+      4. priority tier: 1 (coding platforms) before 2 (model providers).
+    """
+    def sort_key(it):
+        d = it.get("date") or ""
+        unknown = d in ("", "Unknown")
+        return (
+            1 if it.get("is_active_deal") else 0,   # active first
+            0 if unknown else 1,                    # dated before Unknown
+            d,                                      # newest date first (desc lexicographic)
+            2 - (it.get("priority") or 2),          # priority 1 before 2
+        )
+    return sorted(items, key=sort_key, reverse=True)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Dedupe keys + state file
 # ─────────────────────────────────────────────────────────────────────────────
@@ -285,6 +535,82 @@ def make_key(company, title):
     norm = normalize_title(title)[:120]
     raw = f"{str(company or '').strip().lower()}::{norm}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+# Tracking params stripped so the same article via different affiliate/referral
+# links still dedupes to a single item.
+_TRACKING_PARAMS = frozenset({
+    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+    "ref", "source", "fbclid", "gclid", "mc_cid", "mc_eid", "spm",
+})
+
+
+def make_url_key(url):
+    """Deterministic dedupe key from a normalized URL (host+path, tracking stripped).
+
+    Used for cross-source dedupe: the same item mirrored under a different
+    company label (e.g. "OpenAI" vs "OpenAI (API)") still has the same URL key
+    and is emitted once. Returns None for an unusable URL.
+    """
+    if not url:
+        return None
+    try:
+        p = urlparse(url)
+    except ValueError:
+        return None
+    host = (p.netloc or "").lower().rstrip(".")
+    path = (p.path or "").rstrip("/")
+    keep = []
+    for pair in (p.query or "").split("&"):
+        if not pair:
+            continue
+        name = pair.split("=", 1)[0].lower()
+        if name not in _TRACKING_PARAMS:
+            keep.append(pair)
+    raw = f"{host}{path}"
+    q = "&".join(sorted(keep))
+    if q:
+        raw += f"?{q}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def dedupe_items_within_run(items):
+    """Drop duplicates within a single run: same dedupe key OR same URL key.
+
+    Keeps the first occurrence (input order = per-source, pre-sort order) so
+    deterministic. Both title/company key and normalized-URL key are consulted,
+    covering the "same title across sources" and "same URL under two company
+    labels" cases.
+    """
+    def winner_key(it):
+        d = it.get("date") or ""
+        known_date = d not in ("", "Unknown")
+        return (
+            1 if it.get("active") or it.get("is_active_deal") else 0,
+            1 if (it.get("priority") or 2) == 1 else 0,
+            1 if known_date else 0,
+            d,
+            str(it.get("key") or ""),
+            str(it.get("url_key") or ""),
+        )
+
+    # Sorting before selection makes async source completion order irrelevant.
+    candidates = sorted(items, key=winner_key, reverse=True)
+    seen_keys, seen_urls = set(), set()
+    out = []
+    for it in candidates:
+        key = it.get("key")
+        url_key = it.get("url_key")
+        if key and key in seen_keys:
+            continue
+        if url_key and url_key in seen_urls:
+            continue
+        if key:
+            seen_keys.add(key)
+        if url_key:
+            seen_urls.add(url_key)
+        out.append(it)
+    return out
 
 
 def merge_state_keys(existing, added, cap=2000):

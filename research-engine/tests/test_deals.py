@@ -12,6 +12,8 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import date, datetime, timezone
+from unittest.mock import patch
 
 # Make research-engine/ importable regardless of how the test runner boots.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -19,7 +21,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from deals_core import (  # noqa: E402
     PROMO_KEYWORDS,
     classify,
+    cap_items_per_source,
+    compute_active_flag,
     dedupe_items,
+    dedupe_items_within_run,
     detect_launch_keywords,
     github_headers,
     html_to_text,
@@ -27,7 +32,9 @@ from deals_core import (  # noqa: E402
     make_key,
     match_keywords,
     merge_state_keys,
+    make_url_key,
     normalize_date,
+    filter_fresh_items,
     parse_feed,
     parse_github_org_repos,
     parse_github_releases,
@@ -185,8 +192,70 @@ class StateAndDedupeTests(unittest.TestCase):
         self.assertNotIn("k0", merged)
         self.assertIn("k2499", merged)
 
+    def test_freshness_drops_old_dated_items_but_keeps_unknown(self):
+        items = [
+            {"title": "old", "date": "2026-07-01"},
+            {"title": "boundary", "date": "2026-07-21"},
+            {"title": "unknown", "date": "Unknown"},
+        ]
+        kept = filter_fresh_items(items, ref_date=date(2026, 8, 4))
+        self.assertEqual([item["title"] for item in kept], ["boundary", "unknown"])
+
+    def test_cap_prefers_active_dated_items_over_unknown(self):
+        items = [
+            {"source": "a", "title": "unknown", "date": "Unknown", "active": False, "key": "u"},
+            {"source": "a", "title": "fresh", "date": "2026-08-03", "active": False, "key": "f"},
+            {"source": "a", "title": "active", "date": "2026-08-01", "active": True, "key": "a"},
+        ]
+        self.assertEqual([i["key"] for i in cap_items_per_source(items, cap=2)], ["a", "f"])
+
+    def test_dedupe_winner_is_priority_aware_not_input_order(self):
+        older = {"key": "same", "url_key": "url", "date": "2026-07-20", "priority": 2, "is_active_deal": False}
+        winner = {"key": "same", "url_key": "url", "date": "2026-08-03", "priority": 1, "is_active_deal": True, "title": "winner"}
+        self.assertEqual(dedupe_items_within_run([older, winner])[0], winner)
+
+    def test_expired_active_offer_is_not_active(self):
+        self.assertFalse(compute_active_flag(["coupon"], "2026-08-01", ref_date=date(2026, 8, 4), expiry_date="2026-08-03"))
+        self.assertTrue(compute_active_flag(["coupon"], "2026-08-01", ref_date=date(2026, 8, 2), expiry_date="2026-08-03"))
+
+    def test_source_cap_and_url_dedupe(self):
+        items = [
+            {"source": "a", "date": "2026-08-04", "key": "a1", "url_key": "u1"},
+            {"source": "a", "date": "2026-08-03", "key": "a2", "url_key": "u2"},
+            {"source": "a", "date": "2026-08-02", "key": "a3", "url_key": "u3"},
+        ]
+        capped = cap_items_per_source(items, cap=2)
+        self.assertEqual([item["key"] for item in capped], ["a1", "a2"])
+        duplicate = {"key": "different", "url_key": "u1"}
+        self.assertEqual(len(dedupe_items_within_run(capped + [duplicate])), 2)
+
+    def test_active_deal_flag_is_additive(self):
+        self.assertFalse(compute_active_flag(["discount"], "2026-08-04", ref_date=date(2026, 8, 4)))
+        self.assertFalse(compute_active_flag(["coupon"], "2026-07-01", ref_date=date(2026, 8, 4)))
+        self.assertTrue(compute_active_flag(["coupon"], "2026-08-01", ref_date=date(2026, 8, 4)))
+
 
 class HtmlExtractionTests(unittest.TestCase):
+    def test_undated_html_index_drops_historical_keyword_match(self):
+        from unittest import mock
+        import deals
+
+        entry = {"id": "html", "type": "html", "company": "OpenAI", "platform": "openai",
+                 "category": "model-provider", "priority": 2, "url": "https://example.test/news"}
+        old_index = "<title>News</title><p>Our 2024 student discount promo is archived.</p>"
+        with mock.patch.object(deals, "read_url", return_value=old_index):
+            self.assertEqual(deals.scan_source(entry), [])
+
+    def test_undated_html_current_signal_is_retained(self):
+        from unittest import mock
+        import deals
+
+        entry = {"id": "html", "type": "html", "company": "OpenAI", "platform": "openai",
+                 "category": "model-provider", "priority": 2, "url": "https://example.test/news"}
+        current = "<title>Free Credits</title><p>Currently available to all new users.</p>"
+        with mock.patch.object(deals, "read_url", return_value=current):
+            self.assertEqual(len(deals.scan_source(entry)), 1)
+
     def test_strip_html(self):
         html = ("<html><body><h1>Free Credits</h1><p>Get <b>90% off</b> today "
                 "&amp; more!</p></body></html>")
@@ -417,6 +486,62 @@ class RegistrySanityTests(unittest.TestCase):
 
 
 class FlaggedItemPipelineTests(unittest.TestCase):
+    def test_dalle_launch_wording_is_not_current_promotion_evidence(self):
+        from deals import _to_item
+
+        item = _to_item(entry_by_id("openai-news-rss"), {
+            "title": "DALL·E now available in beta",
+            "link": "https://openai.com/index/dall-e-now-available-in-beta",
+            "date_raw": "2022-07-20",
+            "description": "DALL·E now available in beta with free credits.",
+        })
+
+        self.assertIsNotNone(item)
+        self.assertFalse(item["active"])
+        self.assertFalse(item["is_active_deal"])
+
+    def test_quick_scan_drops_stale_dalle_item_even_when_marked_active(self):
+        from deals import format_compact, run_scan
+
+        stale_dalle = {
+            "company": "OpenAI",
+            "title": "DALL·E now available in beta",
+            "url": "https://openai.com/index/dall-e-now-available-in-beta",
+            "date": "2022-07-20",
+            "keywords": ["now-available"],
+            "source": "openai-news-rss",
+            "platform": "openai",
+            "priority": 1,
+            "summary": "DALL·E now available in beta",
+            "expiry_date": "Unknown",
+            "key": make_key("OpenAI", "DALL·E now available in beta"),
+            "url_key": make_url_key("https://openai.com/index/dall-e-now-available-in-beta"),
+            "active": True,
+            "is_active_deal": False,
+        }
+        # run_scan stamps its own UTC "today", so the fresh item must be dated today.
+        fresh = dict(stale_dalle, title="Fresh OpenAI promotion",
+                     date=datetime.now(timezone.utc).date().isoformat(),
+                     key=make_key("OpenAI", "Fresh OpenAI promotion"),
+                     url_key=make_url_key("https://example.test/fresh"),
+                     active=False, is_active_deal=False)
+        entry = {"id": "openai-news-rss", "type": "rss"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = os.path.join(tmp, "deals_state.json")
+            with open(state_path, "w", encoding="utf-8") as fh:
+                json.dump({"last_run": "2022-07-20 00:00 UTC",
+                           "keys": [stale_dalle["key"]]}, fh)
+            with patch("deals.scan_source", return_value=[stale_dalle, fresh]):
+                result = run_scan(entries=[entry], quick=True, state_file=state_path,
+                                  freshness_days=14, max_workers=1)
+
+        self.assertEqual([item["title"] for item in result["items"]], [fresh["title"]])
+        self.assertEqual([item["title"] for item in result["new_items"]], [fresh["title"]])
+        compact = format_compact(result)
+        self.assertNotIn("DALL·E now available in beta", compact)
+        self.assertIn("Fresh OpenAI promotion", compact)
+
     def test_flag_flow_marks_promo_and_launch(self):
         """Integration: classify -> key -> dedupe -> new detection."""
         from deals import _to_item  # imported lazily to avoid CLI side effects
@@ -438,6 +563,19 @@ class FlaggedItemPipelineTests(unittest.TestCase):
         # Unrelated item -> not flagged at all.
         raw2 = {"title": "Bug fixes and perf", "link": "https://cursor.com", "date_raw": "", "description": ""}
         self.assertIsNone(_to_item(entry, raw2))
+
+    def test_to_item_adds_internal_dedupe_and_active_metadata(self):
+        from deals import _to_item
+
+        entry = entry_by_id("openai-news-rss")
+        item = _to_item(entry, {
+            "title": "Coupon code SAVE20",
+            "link": "https://example.test/deal?utm_source=rss",
+            "date_raw": "2026-08-04T00:00:00Z",
+            "description": "Use the code today.",
+        })
+        self.assertEqual(item["url_key"], make_url_key("https://example.test/deal?utm_source=rss"))
+        self.assertTrue(item["is_active_deal"])
 
 
 if __name__ == "__main__":

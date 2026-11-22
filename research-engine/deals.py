@@ -41,14 +41,25 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from deals_core import (
+    DEFAULT_FRESHNESS_DAYS,
+    DEFAULT_SOURCE_CAP,
+    cap_items_per_source,
     classify,
+    compute_active_flag,
     dedupe_items,
+    dedupe_items_within_run,
+    filter_fresh_items,
     github_headers,
     html_to_text,
+    extract_expiry_date,
+    has_current_signal,
+    is_recurring_promo,
     load_state,
     make_key,
+    make_url_key,
     merge_state_keys,
     normalize_date,
+    order_items,
     parse_feed,
     parse_github_org_repos,
     parse_github_releases,
@@ -127,6 +138,8 @@ def _fetch_html(entry, headers=None):
         "link": entry["url"],
         "date_raw": "",
         "description": scan_text,
+        "current_signal": has_current_signal(scan_text),
+        "expiry_date": extract_expiry_date(scan_text),
     }]
 
 
@@ -139,15 +152,24 @@ def _to_item(entry, raw):
     if not title:
         return None
     description = raw.get("description") or ""
+    combined_text = f"{title} {description}"
     promo, launch = classify(title, description)
     keywords = promo + launch
     if not keywords:
         return None
-    return {
+    date_value = normalize_date(raw.get("date_raw"))
+    current_signal = bool(raw.get("current_signal")) or has_current_signal(combined_text)
+    expiry_date = raw.get("expiry_date") or extract_expiry_date(combined_text)
+    # Bounded HTML crawls often return an entire historical index with no item
+    # dates.  Do not turn a page-wide keyword into a current deal without an
+    # explicit current/active signal in the page text.
+    if entry.get("type") == "html" and date_value == "Unknown" and not current_signal:
+        return None
+    item = {
         "company": entry["company"],
         "title": title,
         "url": raw.get("link") or raw.get("url") or entry["url"],
-        "date": normalize_date(raw.get("date_raw")),
+        "date": date_value,
         "date_raw": raw.get("date_raw") or "",
         "keywords": keywords,
         "category": entry["category"],
@@ -155,8 +177,19 @@ def _to_item(entry, raw):
         "platform": entry["platform"],
         "priority": entry.get("priority", 2),
         "summary": truncate(description, 400),
+        "expiry_date": expiry_date,
         "key": make_key(entry["company"], title),
     }
+    item["url_key"] = make_url_key(item["url"])
+    item["active"] = is_recurring_promo(keywords) and compute_active_flag(
+        keywords, item["date"], expiry_date=expiry_date,
+        current_signal=current_signal,
+    )
+    item["is_active_deal"] = compute_active_flag(
+        keywords, item["date"], expiry_date=expiry_date,
+        current_signal=current_signal,
+    )
+    return item
 
 
 def scan_source(entry):
@@ -190,7 +223,9 @@ def scan_source(entry):
     return items
 
 
-def run_scan(entries=None, quick=False, state_file=None, max_workers=10, run_deadline=RUN_DEADLINE):
+def run_scan(entries=None, quick=False, state_file=None, max_workers=10,
+             run_deadline=RUN_DEADLINE, freshness_days=DEFAULT_FRESHNESS_DAYS,
+             source_cap=DEFAULT_SOURCE_CAP):
     """Scan the registry concurrently, dedupe against state, persist state.
 
     Never raises: per-source failures are recorded and the run always returns a
@@ -224,8 +259,11 @@ def run_scan(entries=None, quick=False, state_file=None, max_workers=10, run_dea
                 if not future.done():
                     failed[entry["id"]] = "run deadline exceeded"
 
-    # Newest first; Unknown dates sink to the bottom.
-    items.sort(key=lambda it: (it["date"] == "Unknown", it["date"]), reverse=True)
+    # Filter before capping: stale feed history must not consume the source quota.
+    items = filter_fresh_items(items, max_age_days=freshness_days)
+    items = cap_items_per_source(items, cap=source_cap)
+    items = dedupe_items_within_run(items)
+    items = order_items(items)
 
     new_items, merged_keys = dedupe_items(items, state.get("keys", []))
     state["keys"] = merged_keys
@@ -375,6 +413,16 @@ def main(argv=None):
         "--quick", action="store_true",
         help="skip slow HTML changelog pages; keep GitHub releases + RSS",
     )
+    parser.add_argument(
+        "--freshness-days", type=int,
+        default=int(os.environ.get("DEALS_FRESHNESS_DAYS", DEFAULT_FRESHNESS_DAYS)),
+        help="drop dated items older than this many days (default: 14; env DEALS_FRESHNESS_DAYS)",
+    )
+    parser.add_argument(
+        "--source-cap", type=int,
+        default=int(os.environ.get("DEALS_SOURCE_CAP", DEFAULT_SOURCE_CAP)),
+        help="maximum qualifying items per source (default: 10; env DEALS_SOURCE_CAP)",
+    )
     args = parser.parse_args(argv)
 
     # Ensure UTF-8 stdout so emoji/unicode never crash the print (Windows console).
@@ -384,7 +432,10 @@ def main(argv=None):
         pass
 
     try:
-        result = run_scan(quick=args.quick, state_file=args.state_file)
+        result = run_scan(
+            quick=args.quick, state_file=args.state_file,
+            freshness_days=args.freshness_days, source_cap=args.source_cap,
+        )
         if args.emit == "json":
             output = format_json(result)
         elif args.emit == "md":
