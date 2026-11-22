@@ -909,6 +909,79 @@ async function main() {
   outputs.set("Node 17: Create Weekly Notion Page", weeklyResult);
   pass("Node 17 mocked weekly Notion page");
 
+  // Node 15 tells the model to emit the JSON block LAST. The page body must still
+  // carry the narrative that sits before the fence, not an empty string.
+  const weeklyJsonLast = {
+    choices: [
+      {
+        message: {
+          content: [
+            "## Story Trends",
+            "**Mock trend** - seen in 2 briefings https://example.com/a",
+            "",
+            "## Recommendations",
+            "- **Try MockModel** - because it is cheap. https://example.com/b",
+            "",
+            "```json",
+            JSON.stringify({
+              summary: "Mock weekly summary.",
+              category: ["AI Agents"],
+              topics: [],
+              providers: [],
+              featured_models: [],
+              importance: "High",
+              new_model_released: false,
+              pricing_changed: false,
+              open_source: false,
+              free_promotion: false,
+              worth_installing: false,
+              best_coding_model: "",
+              best_reasoning_model: "",
+              best_local_model: "",
+              best_value_api: "",
+              biggest_release: "",
+              promotions_found: false,
+              top_deal: "",
+            }),
+            "```",
+          ].join("\n"),
+        },
+      },
+    ],
+  };
+  let jsonLastBody = null;
+  const jsonLastChunks = [];
+  await runCodeNode("Node 17: Create Weekly Notion Page", weeklyJsonLast, {
+    async httpRequest(request) {
+      if (request.method === "POST") {
+        return { id: "weekly-page-id", url: "https://notion.so/mock-weekly" };
+      }
+      if (request.method === "PATCH") {
+        const children = JSON.parse(request.body).children || [];
+        jsonLastChunks.push(
+          children
+            .map((b) => {
+              const rt = (b[b.type] && b[b.type].rich_text) || [];
+              return rt.map((r) => r.text.content).join("");
+            })
+            .join("\n")
+        );
+        return { ok: true };
+      }
+      throw new Error(`Unexpected weekly request: ${request.method} ${request.url}`);
+    },
+  });
+  jsonLastBody = jsonLastChunks.join("\n");
+  assert.ok(jsonLastBody, "Node 17 should append blocks when the JSON block is last");
+  // markdownToBlocks strips the "## " prefix into heading_2 blocks, so match the heading text.
+  assert.match(jsonLastBody, /Story Trends/, "narrative before the JSON fence must reach the page");
+  assert.match(jsonLastBody, /Recommendations/, "recommendations before the JSON fence must reach the page");
+  assert.ok(
+    jsonLastBody.includes("Mock trend"),
+    "the actual trend text before the fence must be present, not an empty body"
+  );
+  pass("Node 17 keeps the narrative when the model puts the JSON block last");
+
   await assert.rejects(
     runCodeNode("Node 17: Create Weekly Notion Page", {
       choices: [{ message: { content: "## Weekly Executive Summary\nNo metadata block here." } }],
