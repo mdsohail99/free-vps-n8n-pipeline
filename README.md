@@ -164,7 +164,7 @@ This repository hosts a curated library of modular automation workflows:
 | Category | Workflow Name | Description | Link |
 |---|---|---|:---:|
 | 🤖 **AI Intelligence** | **AI Daily Briefing** | Autonomous news scraping, OpenRouter LLMs, 6-section Notion database catalog, and Slack alerts. | [`workflows/ai-intelligence/ai-daily-briefing`](workflows/ai-intelligence/ai-daily-briefing/) |
-| 🛠️ **DevOps** | *Coming Soon* | Automated VPS backup, SSL monitor, and container health triage. | `workflows/devops-monitoring/` |
+| 🛠️ **DevOps** | **VPS Maintenance** | Automated OS & Docker updates, atomic SQLite/Postgres backups, and health rollback. | [`infrastructure/`](infrastructure/) |
 | 💼 **Business Ops** | *Coming Soon* | Smart email triage, invoice parsing, and CRM sync. | `workflows/business-ops/` |
 
 ---
@@ -178,7 +178,7 @@ This repository hosts a curated library of modular automation workflows:
 - [x] 🗄️ **Notion Intelligence DB Schema Builder (`setup_notion_db.py`)**
 - [ ] 🛠️ **Terraform / Ansible One-Click Infra Blueprints**
 - [ ] 📑 **Additional Workflows (Email Triage, Invoice Parsing, Domain Uptime Monitor)**
-- [ ] 💾 **Automated Database Backup & Disaster Recovery Script**
+- [x] 💾 **Automated Database Backup & Disaster Recovery Script (`infrastructure/vps_weekly_maintenance.py`)**
 
 Read the full roadmap at [`ROADMAP.md`](ROADMAP.md).
 

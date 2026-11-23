@@ -103,3 +103,14 @@ Before executing any commands on your server, make sure you have created free ac
    * **VPS SSH**: Create an `SSH Private Key` credential named `VPS SSH`. Enter `ubuntu` as user, your public IP as host, and paste the contents of your VPS private SSH key.
 4. Open nodes `Node 6`, `Node 8`, `Node 14`, and `Node 16` and ensure they are connected to the correct credentials in the n8n UI.
 5. Click **Save** and toggle the workflow to **Active**!
+
+---
+
+## 🛡️ Phase 6: (Optional) Autonomous Weekly Maintenance & Backups
+
+To keep your host OS, Docker engine, and n8n updated automatically while protecting your database with atomic SQLite backups, automatic health rollback, and strict 2-backup storage retention:
+
+```bash
+(crontab -l 2>/dev/null; echo "0 19 * * 6 /usr/bin/python3 ~/free-vps-n8n-pipeline/infrastructure/vps_weekly_maintenance.py >> /var/log/vps_weekly_maintenance.log 2>&1") | crontab -
+```
+*This schedules the updater to run every Sunday at 3:00 AM AWST (Saturday 19:00 UTC). Logs are output to `/var/log/vps_weekly_maintenance.log`.*

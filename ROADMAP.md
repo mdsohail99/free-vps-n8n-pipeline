@@ -4,7 +4,7 @@ This document outlines the development direction, planned features, and communit
 
 ---
 
-## 🎯 Current Status (Version 1.0.0)
+## 🎯 Current Status (Version 1.1.0)
 
 - [x] **Automated VPS Bootstrap (`infrastructure/vps_setup.sh`)**: 1-command installer script for Oracle Cloud Free Tier ARM VPS.
 - [x] **Dockerized Reverse Proxy Stack**: n8n + Caddy 2 with automatic Let's Encrypt TLS/SSL cert management.
@@ -19,7 +19,7 @@ This document outlines the development direction, planned features, and communit
 
 ### Phase 2: Infrastructure Expansion & One-Click Deployments
 - [ ] 🛠️ **Terraform / Ansible One-Click Blueprints**: Automated provisioning for AWS Lightsail, Hetzner, and DigitalOcean free/cheap tiers.
-- [ ] 💾 **Automated Backup & Disaster Recovery**: Script to back up n8n workflows, credentials database, and `.env` configs to encrypted remote storage.
+- [x] 💾 **Automated Backup & Disaster Recovery**: Full-stack maintenance engine (`infrastructure/vps_weekly_maintenance.py`) with atomic SQLite backups, PostgreSQL dumps, health checking, auto-rollback, and 2-backup storage retention.
 - [ ] 📊 **VPS Monitoring Dashboard**: Integrated Lightweight Prometheus & Grafana stack for CPU, memory, and container uptime tracking.
 
 ### Phase 3: Additional Production Automation Workflows

@@ -61,7 +61,7 @@
       "credentials": {
         "sshPrivateKey": {
           "id": "kdwCvoTTiS54qDaE",
-          "name": "VPS SSH (ubuntu@161.33.231.39)"
+          "name": "VPS SSH"
         }
       }
     },
@@ -191,7 +191,7 @@
       "credentials": {
         "sshPrivateKey": {
           "id": "kdwCvoTTiS54qDaE",
-          "name": "VPS SSH (ubuntu@161.33.231.39)"
+          "name": "VPS SSH"
         }
       }
     },
@@ -275,7 +275,7 @@
       "credentials": {
         "sshPrivateKey": {
           "id": "kdwCvoTTiS54qDaE",
-          "name": "VPS SSH (ubuntu@161.33.231.39)"
+          "name": "VPS SSH"
         }
       }
     },
